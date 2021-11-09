@@ -1,0 +1,106 @@
+global chemsh_default_connectivity_toler
+global chemsh_default_connectivity_scale
+set chemsh_default_connectivity_toler 0.0
+set chemsh_default_connectivity_scale 0.0
+
+set job zno_ener
+
+fragment ttt new volatile
+connect coords=$job.pun conn=ttt
+copy_object type=fragment from=ttt to=$job.pun
+delete_object ttt
+
+set qm_region [ get_cluster_region coords=$job.pun region=1 ]
+puts "QM region is: $qm_region"
+
+set qm_charge [ get_molecule_charge coords=$job.pun ]
+set qm_charge [ expr round($qm_charge) ]
+puts "QM charge is: $qm_charge"
+
+# Get list of active atoms for optimisation
+set active_atoms [ get_cluster_region coords=$job.pun region= {1 2 3} ]
+puts "Active atoms: $active_atoms"
+
+read_input  guess.txt {
+vector atoms conf
+O1   conf p4   dens p6
+Zn1  conf s1   dens s0
+end
+}
+
+set conv {
+{newscf}
+{maxcyc 30}
+{print full}
+{Phase  1}
+{  Level  10.0  10.0 }
+{  DIIS }
+{# Switch to phase  2}
+{  next  2}
+{    Tester below  0.75 }
+{Phase  2}
+{  Level  3.0 3.0 }
+{  DIIS }
+{# Switch to phase  3}
+{  next  3}
+{    Tester below  0.25 }
+{Phase  3}
+{  Level  0.5  0.5 }
+{  DIIS }
+{# Switch to phase  4}
+{  next  4}
+{    Tester below  0.075 }
+{Phase  4}
+{  Level 0.0 0.0 }
+{  DIIS }
+{  next  0}
+{# Converge calculation}
+{    Tester below  0.0003  }
+{#  Absolute energy change}
+{    dEabs  below  0.000001 }
+{end}
+}
+
+
+set gulp_arguments   " mm_defs=zno.ff \
+                       include_qm_force=yes \
+                       unique_listing=yes \
+                       use_second_derivatives=no "
+
+
+set gamess_arguments " basisfile=zno.basis \
+                       ecpfile=zno.ecp \
+                       harmonic=yes \
+                       unique_listing=yes \
+                       scf_keywords = [ list $conv ] \
+                       functional=pbe0 \
+                       direct=yes \
+                       echo_input=no print_bqs=no \
+                       charge=$qm_charge  \
+                       scftype=rhf \
+                       mult=1 \
+                       memory=99000000 \
+                       restart=yes "
+#                       guessfile=guess.txt "
+
+set args "qm_region= [ list $qm_region ] \
+          mm_theory = gulp : [ list $gulp_arguments ] \
+          qm_theory = gamess : [ list $gamess_arguments ] \
+          electrostatics_option=polarised \
+          name_bqs=yes \
+          calculate_connectivity=no \
+          shell_tol=0.0000001 \
+          max_shell_cycles=4   "
+
+#
+# Run QM/MM optimisation
+#
+dl-find coords=$job.pun restart=no \
+        theory=hybrid : [list $args] \
+        active_atoms= $active_atoms \
+        result=${job}_opt.pun \
+        tolerance=0.003
+
+# To visualise result
+write_xyz file=${job}_opt.xyz coords=${job}_opt.pun
+
